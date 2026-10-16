@@ -1,0 +1,17 @@
+{
+  "name": "navguard",
+  "version": "1.0.0",
+  "private": true,
+  "type": "module",
+  "packageManager": "pnpm@12.14.0",
+  "scripts": {
+    "dev": "pnpm --filter extension dev",
+    "build": "pnpm --filter extension build",
+    "test": "pnpm --filter extension test",
+    "test:coverage": "pnpm --filter extension test:coverage",
+    "lint": "pnpm --filter extension lint"
+  },
+  "workspaces": [
+    "extension"
+  ]
+}
