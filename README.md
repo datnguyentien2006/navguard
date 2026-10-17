@@ -19,25 +19,6 @@
 
 ---
 
-## 📸 Hình ảnh sản phẩm
-
-**1. Màn hình cảnh báo nguy hiểm (Interstitial Page - Glassmorphism)**
-![Interstitial Page](./docs/images/1-interstitial.png)
-
-**2. Quản lý Log và Danh sách (Popup UI)**
-![Popup UI](./docs/images/2-popup.png)
-
-**3. Trang Cài đặt (Options Page)**
-![Options Page](./docs/images/3-options.png)
-
-**4. Cảnh báo nhẹ trên trang web (Toast UI)**
-![Toast UI](./docs/images/4-toast.png)
-
-**5. Icon Extension**
-![Icon](./docs/images/5-icon.png)
-
----
-
 ## ⚙️ Toàn bộ Logic Hoạt Động
 
 Hệ thống NavGuard hoạt động dựa trên sự kết hợp chặt chẽ giữa **Extension (Client)** và **Server API (Backend)**.
@@ -111,6 +92,25 @@ Khi Extension cần đánh giá một tên miền, nó gọi API `POST /v1/reput
 ## 🧪 Kiểm thử (Testing)
 Chạy Unit Test cho Extension (Vitest):
 `cd ~/navguard/extension && pnpm test`
+
+---
+
+## 📸 Thư viện Hình ảnh (Gallery)
+
+**1. Màn hình cảnh báo nguy hiểm (Interstitial Page - Glassmorphism)**
+![Interstitial Page](./docs/images/1-interstitial.png)
+
+**2. Quản lý Log và Danh sách (Popup UI)**
+![Popup UI](./docs/images/2-popup.png)
+
+**3. Trang Cài đặt (Options Page)**
+![Options Page](./docs/images/3-options.png)
+
+**4. Cảnh báo nhẹ trên trang web (Toast UI)**
+![Toast UI](./docs/images/4-toast.png)
+
+**5. Icon Extension**
+![Icon](./docs/images/5-icon.png)
 
 ---
 
