@@ -177,7 +177,6 @@ export async function decideLevel(input: DecisionInput): Promise<Decision> {
 
   // MỨC 3 — interstitial
   if (
-    f.inBlocklist ||
     f.overlay ||
     f.isMetaRefresh ||
     risk >= 70 ||

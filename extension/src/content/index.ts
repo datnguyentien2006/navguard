@@ -4,6 +4,7 @@ import type { Message, NavIntent, Decision } from '../shared/types';
 
 console.log('[NavGuard] Content script loaded on', location.href);
 
+
 // ===== Inject script vào main world =====
 function injectMainWorldScript() {
   const script = document.createElement('script');
@@ -28,7 +29,6 @@ function onCaptureClick(e: MouseEvent) {
     if (overlaySuspicious && e.isTrusted) {
       e.preventDefault();
       e.stopImmediatePropagation();
-
       const intent: NavIntent = {
         sourceUrl: location.href,
         destinationUrl: location.href,
@@ -45,14 +45,11 @@ function onCaptureClick(e: MouseEvent) {
     return;
   }
 
-  // Bỏ qua anchor có download, hoặc target=_blank (để browser xử lý)
   if (anchor.hasAttribute('download')) return;
   if (anchor.target && anchor.target !== '_self') return;
 
   const hrefProp = anchor.href;
   if (!hrefProp) return;
-
-  // Chỉ bỏ qua URL javascript:, mailto:, tel: — không phải navigation web
   if (/^(javascript|mailto|tel):/i.test(hrefProp)) return;
 
   const isTrusted = e.isTrusted;
@@ -76,18 +73,15 @@ function onCaptureClick(e: MouseEvent) {
     timestamp: Date.now()
   };
 
-  // Chặn navigation ngay để chờ decision
   e.preventDefault();
   e.stopImmediatePropagation();
 
   chrome.runtime.sendMessage(
     { type: 'NAV_INTENT', payload: intent } as Message,
     (response: any) => {
-      // Background trả về "immediate" nghĩa là level 0 → tự navigate
       if (response?.allow === 'immediate') {
         window.location.href = intent.destinationUrl;
       }
-      // Các trường hợp khác: background sẽ gửi SHOW_TOAST hoặc redirect interstitial
     }
   );
 }
@@ -101,16 +95,32 @@ chrome.runtime.onMessage.addListener((msg: any) => {
     const intent = msg.intent as NavIntent;
 
     renderToast(decision, intent, (choice) => {
+      console.log(`[NavGuard] Bạn đã chọn: ${choice.toUpperCase()}`);
+      
       chrome.runtime.sendMessage({
         type: choice === 'allow' ? 'ALLOW_ONCE' : 'BLOCK',
         payload: { intent, decision }
-      } as Message);
+      } as Message, (response) => {
+        if (choice === 'allow' && response?.ok) {
+          // Background đã lo việc mở tab mới cho WINDOW_OPEN
+          // Content Script chỉ chuyển trang đối với click link thông thường
+          if (intent.hookType !== 'WINDOW_OPEN') {
+            window.location.href = intent.destinationUrl;
+          }
+        }
+      });
     });
     return;
   }
 
-  if (msg.type === 'BLOCKED_ACK') {
-    // Không cần xử lý gì — toast đã hiện
+  if (msg.type === 'EXECUTE_NAVIGATION') {
+    // Background yêu cầu chuyển trang (Dự phòng)
+    const intent = msg.intent as NavIntent;
+    if (intent.hookType === 'WINDOW_OPEN') {
+      window.open(intent.destinationUrl, '_blank');
+    } else {
+      window.location.href = intent.destinationUrl;
+    }
     return;
   }
 });
@@ -118,6 +128,23 @@ chrome.runtime.onMessage.addListener((msg: any) => {
 // ===== Nhận message từ injected script =====
 window.addEventListener('message', (e) => {
   if (e.source !== window || !e.data?.__ext) return;
+
+  if (e.data.type === 'HOOK_WINDOW_OPEN') {
+    const intent: NavIntent = {
+      sourceUrl: location.href,
+      destinationUrl: e.data.data.url,
+      isTrusted: false,
+      hasUserGesture: navigator.userActivation?.isActive ?? false,
+      overlaySuspicious: false,
+      inIframe: window.top !== window.self,
+      iframeSrc: window.top !== window.self ? getFrameAncestorOrigin() : undefined,
+      hookType: 'WINDOW_OPEN',
+      timestamp: Date.now()
+    };
+    chrome.runtime.sendMessage({ type: 'NAV_INTENT', payload: intent } as Message);
+    return;
+  }
+
   const msg = {
     type: e.data.type,
     payload: e.data.data,

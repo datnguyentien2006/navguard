@@ -180,8 +180,8 @@ document.getElementById('clear-logs')!.addEventListener('click', async () => {
 });
 
 document.getElementById('clear-all')!.addEventListener('click', async () => {
-  if (!confirm('Reset tất cả log, allowlist, blocklist?')) return;
-  await chrome.storage.local.clear();
+  if (!confirm('Reset tất cả log, allowlist, blocklist và phiên làm việc?')) return;
+  await chrome.runtime.sendMessage({ type: 'RESET_ALL' });
   await loadLogs();
   await loadAllowlist();
   await loadBlocklist();

@@ -1,55 +1,36 @@
 import { decideLevel, type Policy } from './decision';
 import { getReputation } from './reputation';
-import {
-  getAllowlist,
-  getBlocklist,
-  addToAllowlist,
-  addToBlocklist,
-  logNavigation,
-  updateLastLogChoice,
-  originOf
-} from './storage';
-import type { Message, NavIntent, Decision } from '../shared/types';
+import { getAllowlist, getBlocklist, addToBlocklist } from './storage';
+import type { Message, NavIntent } from '../shared/types';
 
 console.log('[NavGuard] Background service worker started');
 
-// Policy cache (refresh khi storage thay đổi)
 const policy: Policy = {
   allowlist: new Set<string>(),
-  blocklist: new Set<string>()
+  blocklist: new Set<string>(),
+  sessionAllowlist: new Set<string>()
 };
 
 async function refreshPolicy() {
   policy.allowlist = await getAllowlist();
   policy.blocklist = await getBlocklist();
-  console.log(
-    '[NavGuard] Policy refreshed:',
-    'allowlist =',
-    policy.allowlist.size,
-    'blocklist =',
-    policy.blocklist.size
-  );
 }
-
-// Khởi động: load policy
 refreshPolicy();
 
-// Nghe storage thay đổi để refresh
 chrome.storage.onChanged.addListener((changes, area) => {
-  if (area !== 'local') return;
-  if (changes.allowlist || changes.blocklist) {
-    refreshPolicy();
+  if (area === 'local' && (changes.allowlist || changes.blocklist)) refreshPolicy();
+});
+
+// Xóa session khi đóng tab
+chrome.tabs.onRemoved.addListener((tabId) => {
+  chrome.storage.session.remove(`allow_tab_${tabId}`);
+});
+
+// Xóa session khi reload trang
+chrome.webNavigation.onCommitted.addListener((details) => {
+  if (details.frameId === 0 && details.transitionType === 'reload') {
+    chrome.storage.session.remove(`allow_tab_${details.tabId}`);
   }
-});
-
-chrome.runtime.onInstalled.addListener(() => {
-  console.log('[NavGuard] Installed');
-  refreshPolicy();
-});
-
-chrome.runtime.onStartup.addListener(() => {
-  console.log('[NavGuard] Startup');
-  refreshPolicy();
 });
 
 chrome.runtime.onMessage.addListener((msg: Message, sender, sendResponse) => {
@@ -57,130 +38,94 @@ chrome.runtime.onMessage.addListener((msg: Message, sender, sendResponse) => {
     handleNavIntent(msg.payload, sender.tab?.id).then(sendResponse);
     return true;
   }
-
   if (msg.type === 'ALLOW_ONCE') {
-    handleAllowOnce(msg.payload.intent, sender.tab?.id);
-    sendResponse({ ok: true });
-    return false;
+    handleAllowOnce(msg.payload.intent, sender.tab?.id).then(() => sendResponse({ ok: true }));
+    return true;
   }
-
-  if (msg.type === 'ALLOW_FROM_INTERSTITIAL') {
-    handleAllowFromInterstitial(msg.payload.intent, sender.tab?.id);
-    sendResponse({ ok: true });
-    return false;
-  }
-
   if (msg.type === 'BLOCK') {
-    handleBlock(msg.payload.intent, msg.payload.decision);
-    sendResponse({ ok: true });
-    return false;
+    handleBlock(msg.payload.intent).then(() => sendResponse({ ok: true }));
+    return true;
   }
-
-  if (
-    msg.type === 'HOOK_WINDOW_OPEN' ||
-    msg.type === 'HOOK_PUSH_STATE' ||
-    msg.type === 'HOOK_REPLACE_STATE' ||
-    msg.type === 'HOOK_META_REFRESH' ||
-    msg.type === 'HOOK_LOCATION_ASSIGN' ||
-    msg.type === 'HOOK_LOCATION_REPLACE'
-  ) {
-    console.log('[NavGuard] Hook:', msg.type, msg);
-    return false;
+  if (msg.type === 'RESET_ALL') {
+    chrome.storage.local.clear();
+    chrome.storage.session.clear();
+    refreshPolicy().then(() => sendResponse({ ok: true }));
+    return true;
   }
-
   return false;
 });
 
-async function handleNavIntent(
-  intent: NavIntent,
-  tabId?: number
-): Promise<{ allow: 'immediate' | 'pending' }> {
+async function handleNavIntent(intent: NavIntent, tabId?: number): Promise<{ allow: 'immediate' | 'pending' | 'blocked_silent' }> {
   if (tabId) intent.tabId = tabId;
 
-  const decision = await decideLevel({
-    intent,
-    policy,
-    getReputation
-  });
+  // CHẶN IM LẶNG: Kiểm tra blocklist ngay lập tức trên RAM (tránh race condition)
+  try {
+    const dst = new URL(intent.destinationUrl);
+    const noWww = dst.origin.replace('://www.', '://');
+    const withWww = dst.origin.replace('://', '://www.');
+    if (policy.blocklist.has(dst.origin) || policy.blocklist.has(noWww) || policy.blocklist.has(withWww)) {
+      return { allow: 'blocked_silent' };
+    }
+  } catch (e) {}
 
-  // Ghi log mọi decision (trừ level 0 để tránh spam)
-  if (decision.level > 0) {
-    await logNavigation(intent, decision);
+  // Lấy danh sách cho phép tạm thời của riêng tab này
+  let tabAllow = new Set<string>();
+  if (tabId) {
+    const data = await chrome.storage.session.get(`allow_tab_${tabId}`);
+    if (data[`allow_tab_${tabId}`]) tabAllow = new Set(data[`allow_tab_${tabId}`]);
   }
 
-  console.log('[NavGuard] Decision:', {
-    level: decision.level,
-    action: decision.action,
-    reason: decision.reason,
-    dest: intent.destinationUrl
-  });
+  const currentPolicy = { ...policy, sessionAllowlist: tabAllow };
+  const decision = await decideLevel({ intent, policy: currentPolicy, getReputation });
 
-  if (decision.level === 0) {
-    return { allow: 'immediate' };
-  }
+  console.log('[NavGuard] Decision:', { level: decision.level, reason: decision.reason, dest: intent.destinationUrl });
 
-  if (!tabId) {
-    return { allow: 'pending' };
+  // TH1: Chặn im lặng
+  if (decision.level === 0 && decision.reason.includes('blocklisted')) {
+     return { allow: 'blocked_silent' };
   }
+  if (decision.level === 0) return { allow: 'immediate' };
+  if (!tabId) return { allow: 'pending' };
 
   if (decision.level === 1 || decision.level === 2) {
-    chrome.tabs.sendMessage(tabId, {
-      type: 'SHOW_TOAST',
-      decision,
-      intent
-    });
+    chrome.tabs.sendMessage(tabId, { type: 'SHOW_TOAST', decision, intent });
     return { allow: 'pending' };
   }
 
   if (decision.level === 3) {
     const id = crypto.randomUUID();
-    await chrome.storage.session.set({
-      [`block_${id}`]: { intent, decision }
-    });
-
-    const url = chrome.runtime.getURL(`blocked.html?id=${id}`);
-    chrome.tabs.update(tabId, { url });
+    await chrome.storage.session.set({ [`block_${id}`]: { intent, decision } });
+    chrome.tabs.update(tabId, { url: chrome.runtime.getURL(`blocked.html?id=${id}`) });
     return { allow: 'pending' };
   }
-
   return { allow: 'pending' };
 }
 
 async function handleAllowOnce(intent: NavIntent, tabId?: number) {
+  const origin = new URL(intent.destinationUrl).origin;
+  if (tabId) {
+    const key = `allow_tab_${tabId}`;
+    const data = await chrome.storage.session.get(key);
+    const list = new Set(data[key] || []);
+    list.add(origin);
+    await chrome.storage.session.set({ [key]: Array.from(list) });
+    
+    // Mở tab mới nếu là quảng cáo popup
+    if (intent.hookType === 'WINDOW_OPEN') {
+      chrome.tabs.create({ url: intent.destinationUrl, openerTabId: tabId });
+    }
+  }
   console.log('[NavGuard] ALLOW_ONCE:', intent.destinationUrl);
-
-  const origin = originOf(intent.destinationUrl);
-  if (origin) {
-    await addToAllowlist(origin, 'user-click-allow');
-    await refreshPolicy();
-  }
-  await updateLastLogChoice(intent.destinationUrl, 'allow');
-
-  if (!tabId) return;
-  chrome.tabs.update(tabId, { url: intent.destinationUrl });
 }
 
-async function handleAllowFromInterstitial(intent: NavIntent, tabId?: number) {
-  console.log('[NavGuard] ALLOW_FROM_INTERSTITIAL:', intent.destinationUrl);
+async function handleBlock(intent: NavIntent) {
+  const origin = new URL(intent.destinationUrl).origin;
+  
+  // Cập nhật ngay vào bộ nhớ RAM để chặn tức thì
+  policy.blocklist.add(origin); 
+  console.log('[NavGuard] Đã chặn tức thì (RAM):', origin);
 
-  const origin = originOf(intent.destinationUrl);
-  if (origin) {
-    await addToAllowlist(origin, 'user-interstitial-allow');
-    await refreshPolicy();
-  }
-  await updateLastLogChoice(intent.destinationUrl, 'allow');
-
-  if (!tabId) return;
-  chrome.tabs.update(tabId, { url: intent.destinationUrl });
-}
-
-async function handleBlock(intent: NavIntent, decision: Decision) {
-  console.log('[NavGuard] BLOCK:', intent.destinationUrl, decision.level);
-
-  const origin = originOf(intent.destinationUrl);
-  if (origin) {
-    await addToBlocklist(origin, 'user-click-block');
-    await refreshPolicy();
-  }
-  await updateLastLogChoice(intent.destinationUrl, 'block');
+  // Lưu vào ổ cứng
+  await addToBlocklist(origin, 'user-click-block');
+  await refreshPolicy();
 }
