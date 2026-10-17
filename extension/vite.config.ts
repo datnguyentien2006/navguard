@@ -5,7 +5,8 @@ import {
   existsSync,
   readdirSync,
   renameSync,
-  rmSync
+  rmSync,
+  cpSync
 } from 'fs';
 
 export default defineConfig({
@@ -64,7 +65,16 @@ export default defineConfig({
           copyFileSync(injectedSrc, resolve(dist, 'injected.js'));
         }
 
-        // 3. Move HTML từ dist/src/pages/ về dist/
+        // 3. Copy thư mục assets (chứa icons)
+        const assetsSrc = resolve(__dirname, 'assets');
+        if (existsSync(assetsSrc)) {
+          cpSync(assetsSrc, resolve(dist, 'assets'), { recursive: true });
+          console.log('[NavGuard] Đã copy thư mục assets/');
+        } else {
+          console.warn('[NavGuard] CẢNH BÁO: Không tìm thấy thư mục assets/');
+        }
+
+        // 4. Move HTML từ dist/src/pages/ về dist/
         const srcPagesDir = resolve(dist, 'src/pages');
         if (existsSync(srcPagesDir)) {
           const htmlFiles = readdirSync(srcPagesDir).filter((f) =>

@@ -1,43 +1,99 @@
-# NavGuard — Chặn Redirect Quảng Cáo & Lừa Đảo
+# 🛡️ NavGuard — Hệ thống chặn Redirect Quảng Cáo & Lừa Đảo
 
-Dự án bảo vệ người dùng khỏi clickjacking, redirect độc hại, và quảng cáo xâm nhập bằng Phân tích tên miền thời gian thực.
+**NavGuard** là một giải pháp bảo mật toàn diện (bao gồm Chrome Extension và Backend API Server) giúp bảo vệ người dùng khỏi các cuộc tấn công mạng phổ biến: Clickjacking (lớp phủ trong suốt), tự động chuyển hướng độc hại (Malicious Redirects), lừa đảo trực tuyến (Phishing) và quảng cáo xâm nhập.
+
+## 👨‍💻 Tác giả
+- **Họ và tên:** Nguyễn Tiến Đạt
+- **Sinh viên:** Ngành Khoa học máy tính
+- **Trường:** Trường Đại học Bách khoa - Đại học Quốc gia Thành phố Hồ Chí Minh (HCMUT - VNU-HCM)
+
+---
 
 ## 🌟 Tính năng nổi bật
-- **Smart Decision:** Tự động cho qua nếu tên miền uy tín (>1 năm tuổi), tự động chặn nếu là trang lừa đảo.
-- **Phân tích RDAP:** Kiểm tra tuổi đời tên miền thời gian thực qua API Server.
-- **Chặn Clickjacking:** Phát hiện lớp phủ trong suốt (Overlay) và chặn đứng.
-- **Giao diện Glassmorphism:** Màn hình cảnh báo thiết kế hiện đại, font chữ chuẩn bảo mật.
-- **Tùy biến mạnh mẽ:** Trang Options cho phép bật/tắt từng mức độ cảnh báo và Server API.
-- **Quản lý danh sách:** Allowlist (Luôn cho qua), Blocklist (Luôn chặn) trực quan qua Popup.
+- **Bắt trọn mọi điều hướng:** Phát hiện không chỉ click chuột, mà còn cả script tự động chuyển hướng (`window.open`, `meta refresh`, `history.pushState`).
+- **Phát hiện Clickjacking:** Thuật toán nhận diện lớp phủ trong suốt (Overlay).
+- **4 Mức độ can thiệp thông minh:** Từ cho qua im lặng đến chặn toàn trang (Interstitial).
+- **Smart Decision (Quyết định thông minh):** Kết hợp với Backend Server để phân tích tuổi đời tên miền (RDAP) và danh sách đen. Tự động cho qua nếu uy tín, tự động chặn nếu nguy hiểm.
+- **Giao diện đỉnh cao:** Màn hình cảnh báo thiết kế theo phong cách Glassmorphism (Kính mờ), font chữ chuẩn bảo mật.
+- **Quản lý linh hoạt:** Trang Options cho phép tùy chỉnh mức độ cảnh báo. Popup quản lý Allowlist/Blocklist.
+
+---
+
+## ⚙️ Toàn bộ Logic Hoạt Động
+
+Hệ thống NavGuard hoạt động dựa trên sự kết hợp chặt chẽ giữa **Extension (Client)** và **Server API (Backend)**.
+
+### 1. Lớp Bắt Sự Kiện (Detection Layer - Extension)
+Extension sử dụng 3 lớp phòng thủ để bắt mọi hành vi chuyển hướng:
+- **Content Script (Capture Phase):** Bắt sự kiện click toàn trang. Kiểm tra xem người dùng có thực sự click không (`isTrusted`), click vào link hay click vào một vùng trống.
+- **Injected Script (Main World):** Chèn mã độc lập vào trang web để "móc nối" (hook) các hàm hệ thống:
+  - Hook `window.open`: Bắt các tab popup tự động mở.
+  - Hook `history.pushState`: Bắt các trang web giả mạo URL.
+  - Hook `location.assign`: Bắt script tự động đổi trang.
+  - MutationObserver: Theo dõi và bắt thẻ `<meta http-equiv="refresh">`.
+- **Phân tích Clickjacking:** Khi người dùng click, Extension lấy phần tử trên cùng tại tọa độ đó (`elementFromPoint`). Nếu phần tử đó có độ mờ `opacity < 0.15`, phủ toàn màn hình và không có nội dung -> Kết luận là Overlay độc hại.
+
+### 2. Bộ Não Quyết Định (Decision Engine - Extension)
+Mỗi khi phát hiện hành vi chuyển hướng, Extension thu thập dữ liệu và tính điểm rủi ro (Risk Score):
+- **Cộng điểm:** Không có thao tác người dùng (+40), Overlay (+35), Meta refresh (+25), Lệch link (+25), Giao thức HTTP/HTTPS (+20).
+- **Trừ điểm:** Nằm trong Allowlist (-60), Cùng tên miền gốc và an toàn (-50).
+- **Phân loại 4 Mức:**
+  - **Level 0 (Im lặng):** Điểm < 0, cùng origin, hoặc Server báo domain "High Trust". Tự động cho qua.
+  - **Level 1 (Toast Xanh):** Domain lạ, không có dấu hiệu lừa đảo. Hiện thông báo nhẹ.
+  - **Level 2 (Toast Đỏ):** Có dấu hiệu đáng ngờ (Iframe, lệch link, rủi ro trung bình).
+  - **Level 3 (Interstitial):** Có Overlay, Meta refresh, rủi ro cao, hoặc Server báo domain "Low Trust".
+
+### 3. Phân Tích Tên Miền (Backend Server)
+Khi Extension cần đánh giá một tên miền, nó gọi API `POST /v1/reputation`:
+- **Kiểm tra Redis Cache:** Nếu domain đã được check trong 24h, trả kết quả ngay.
+- **Kiểm tra RDAP (Domain Age):** Truy vấn hệ thống đăng ký tên miền.
+  - Tuổi đời < 7 ngày: Rất nguy hiểm (Phạt 40 điểm).
+  - Tuổi đời > 1 năm: Rất uy tín (Thưởng 30 điểm).
+- **Safe Browsing:** Đối chiếu từ khóa với danh sách đen (Malware/Phishing).
+- **Trả kết quả:** `level` (high/medium/low) và `score`.
+
+### 4. Can Thiệp (Navigation Controller)
+- Nếu chọn **"Cho phép"**, Extension tự động thêm domain vào Allowlist nội bộ và thực hiện lại lệnh chuyển hướng.
+- Nếu chọn **"Chặn"**, Extension chặn đứng, thêm domain vào Blocklist.
+- Nếu Level 3, Extension hủy chuyển hướng, mở trang `blocked.html`. Trang này yêu cầu người dùng đợi 3 giây và tick chọn "Tôi hiểu rủi ro" trước khi đi tiếp.
+
+---
 
 ## 📁 Cấu trúc dự án
 - `extension/`: Chrome Extension (Manifest V3, TypeScript, Vite).
-- `server/`: API Server (Fastify, PostgreSQL, Redis, RDAP).
+  - `background/`, `content/`, `injected/`, `pages/`, `shared/`
+- `server/`: Backend API (Fastify, Redis, PostgreSQL).
+  - `db/`, `routes/`, `services/`
+- `scripts/`: Các script khởi động tự động.
 - `docs/`: Tài liệu test.
 
-## 🚀 Hướng dẫn khởi chạy
+---
 
-### Yêu cầu
-- Node.js 20+, pnpm.
-- Docker & Docker Compose.
-- Chrome / Edge.
+## 🚀 Hướng dẫn cài đặt và Khởi chạy
 
-### Chạy 1 chạm (Khuyên dùng)
-Mở WSL2 và chạy lệnh sau:
-`~/navguard/scripts/start-all.sh`
+### Yêu cầu hệ thống
+- Node.js 20+ & pnpm
+- Docker & Docker Compose
+- Trình duyệt Chrome/Edge/Coccoc
 
-Script này sẽ tự động bật Database, Build Extension và chạy Server API. 
-*(Lưu ý: Sau khi script báo Build xong, bạn vào `chrome://extensions` bấm Reload NavGuard để cập nhật).*
+### Chạy Local (Dành cho Dev)
+1. **Khởi động Server & Database:**
+   `~/navguard/scripts/start-all.sh`
+   *(Script này sẽ bật Docker Postgres/Redis, build Extension và chạy Server tại `http://localhost:3000`)*
 
-### Chạy thủ công (Từng bước)
-1. **Bật Database:** `cd ~/navguard/server && docker compose up -d`
-2. **Chạy Server:** `cd ~/navguard/server && pnpm dev`
-3. **Build Extension:** `cd ~/navguard/extension && pnpm build && ~/navguard/scripts/sync-to-windows.sh`
-4. **Load vào Chrome:** Load unpacked thư mục `C:\navguard-extension`.
+2. **Cài đặt Extension vào Chrome:**
+   - Mở Chrome, truy cập `chrome://extensions/`
+   - Bật **Developer mode**.
+   - Bấm **Load unpacked**.
+   - Chọn thư mục `C:\navguard-extension`.
 
-## 🧪 Test
-Chạy unit test cho Extension:
+---
+
+## 🧪 Kiểm thử (Testing)
+Chạy Unit Test cho Extension (Vitest):
 `cd ~/navguard/extension && pnpm test`
 
-## 🛡️ License
-Private / Chưa public.
+---
+
+## 🛡️ Giấy phép (License)
+Dự án được thực hiện cho mục đích học tập và nghiên cứu bảo mật tại Trường Đại học Bách khoa - ĐHQG TP.HCM. Vui lòng ghi rõ nguồn tác giả nếu sử dụng lại mã nguồn.
