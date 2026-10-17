@@ -1,0 +1,220 @@
+import type { NavIntent, Decision, Reputation } from '../shared/types';
+import {
+  safeUrl,
+  getRegistrableDomain,
+  urlsEquivalent,
+  isSensitivePath,
+  detectHomoglyph
+} from '../shared/utils';
+
+export type Policy = {
+  allowlist: Set<string>;
+  blocklist: Set<string>;
+};
+
+export type Features = {
+  sameOrigin: boolean;
+  sameRegistrableDomain: boolean;
+  isHttpDowngrade: boolean;
+  isPunycode: boolean;
+  hasHomoglyph: boolean;
+  redirectDepth: number;
+  noUserGesture: boolean;
+  notTrusted: boolean;
+  overlay: boolean;
+  inIframe: boolean;
+  isWindowOpen: boolean;
+  isMetaRefresh: boolean;
+  isHistoryApi: boolean;
+  isLocationHook: boolean;
+  hrefMismatch: boolean;
+  isLoginOrPayment: boolean;
+  inAllowlist: boolean;
+  inBlocklist: boolean;
+};
+
+function isListed(origin: string, list: Set<string>): boolean {
+  if (list.has(origin)) return true;
+  const noWww = origin.replace('://www.', '://');
+  const withWww = origin.replace('://', '://www.');
+  return list.has(noWww) || list.has(withWww);
+}
+
+export function extractFeatures(intent: NavIntent, policy: Policy): Features {
+  const src = safeUrl(intent.sourceUrl);
+  const dst = safeUrl(intent.destinationUrl);
+
+  const hrefMismatch =
+    intent.hrefAttr && intent.hrefAttr !== intent.destinationUrl
+      ? !urlsEquivalent(intent.hrefAttr, intent.destinationUrl, intent.sourceUrl)
+      : false;
+
+  return {
+    sameOrigin: !!(dst && src && src.origin === dst.origin),
+    sameRegistrableDomain: !!(dst && src &&
+      getRegistrableDomain(src.hostname) === getRegistrableDomain(dst.hostname)),
+    isHttpDowngrade: !!(dst && src &&
+      src.protocol === 'https:' && dst.protocol === 'http:'),
+    isPunycode: dst ? dst.hostname.includes('xn--') : false,
+    hasHomoglyph: dst ? detectHomoglyph(dst.hostname) : false,
+    redirectDepth: intent.redirectChain?.length ?? 0,
+    noUserGesture: !intent.hasUserGesture,
+    notTrusted: !intent.isTrusted,
+    overlay: intent.overlaySuspicious,
+    inIframe: intent.inIframe,
+    isWindowOpen: intent.hookType === 'WINDOW_OPEN',
+    isMetaRefresh: intent.hookType === 'META_REFRESH',
+    isHistoryApi:
+      intent.hookType === 'PUSH_STATE' || intent.hookType === 'REPLACE_STATE',
+    isLocationHook:
+      intent.hookType === 'LOCATION_ASSIGN' || intent.hookType === 'LOCATION_REPLACE',
+    hrefMismatch,
+    isLoginOrPayment: dst ? isSensitivePath(dst) : false,
+    inAllowlist: dst ? isListed(dst.origin, policy.allowlist) : false,
+    inBlocklist: dst ? isListed(dst.origin, policy.blocklist) : false
+  };
+}
+
+export function scoreRisk(f: Features): number {
+  let score = 0;
+
+  if (f.inBlocklist) return 100;
+  if (f.noUserGesture) score += 40;
+  if (f.notTrusted) score += 30;
+  if (f.overlay) score += 35;
+  if (f.isMetaRefresh) score += 25;
+  if (f.isWindowOpen && f.noUserGesture) score += 20;
+  if (f.isWindowOpen && !f.noUserGesture) score += 5;
+  if (f.isLocationHook && f.noUserGesture) score += 35;
+  if (f.redirectDepth > 2) score += 20;
+  if (f.redirectDepth > 4) score += 15;
+  if (f.isHttpDowngrade) score += 20;
+  if (f.isPunycode) score += 15;
+  if (f.hasHomoglyph) score += 25;
+  if (f.inIframe) score += 10;
+  if (f.hrefMismatch) score += 25;
+  if (f.isLoginOrPayment) score += 10;
+  if (f.inAllowlist) score -= 60;
+  if (f.sameOrigin && !f.noUserGesture && !f.overlay && f.redirectDepth === 0) {
+    score -= 50;
+  }
+
+  return Math.max(0, Math.min(100, score));
+}
+
+export function buildReason(f: Features, rep: Reputation): string[] {
+  const r: string[] = [];
+  if (f.noUserGesture) r.push('Trang tự chuyển hướng không có thao tác của bạn');
+  if (f.overlay) r.push('Bạn có thể đã bấm vào lớp phủ trong suốt');
+  if (f.redirectDepth > 2) r.push(`Chuỗi chuyển hướng ${f.redirectDepth} bước`);
+  if (f.hrefMismatch) r.push('Link hiển thị khác với đích đến thực tế');
+  if (f.isPunycode || f.hasHomoglyph) r.push('Domain có ký tự giả mạo');
+  if (f.isHttpDowngrade) r.push('Kết nối không mã hóa');
+  if (f.inIframe) r.push('Điều hướng xuất phát từ iframe/quảng cáo');
+  if (f.isMetaRefresh) r.push('Meta refresh tự động');
+  if (rep.level === 'low') r.push(...rep.reasons);
+  if (r.length === 0 && rep.level === 'unknown') {
+    r.push('Domain chưa được xác minh độ tin cậy');
+  }
+  return r;
+}
+
+export type DecisionInput = {
+  intent: NavIntent;
+  policy: Policy;
+  getReputation: (url: string) => Promise<Reputation>;
+};
+
+export async function decideLevel(input: DecisionInput): Promise<Decision> {
+  const { intent, policy, getReputation } = input;
+  const f = extractFeatures(intent, policy);
+  const risk = scoreRisk(f);
+
+  // MỨC 0a — allowlist bypass (cross-origin nhưng user đã allow trước đó)
+  if (
+    f.inAllowlist &&
+    !f.noUserGesture &&
+    !f.overlay &&
+    f.redirectDepth === 0 &&
+    !f.isMetaRefresh
+  ) {
+    return {
+      level: 0,
+      action: 'allow',
+      reason: ['allowlisted domain']
+    };
+  }
+
+  // MỨC 0b — same-origin safe navigation
+  if (
+    f.sameOrigin &&
+    !f.noUserGesture &&
+    !f.notTrusted &&
+    !f.overlay &&
+    f.redirectDepth === 0 &&
+    !f.isLoginOrPayment &&
+    !f.hrefMismatch &&
+    !f.isMetaRefresh
+  ) {
+    return {
+      level: 0,
+      action: 'allow',
+      reason: ['same-origin safe navigation']
+    };
+  }
+
+  const rep = await getReputation(intent.destinationUrl);
+
+  // SMART DECISION: Tự động allow nếu domain high trust (điểm >= 80)
+  if (rep.level === 'high' && rep.score >= 80 && !f.overlay && !f.inBlocklist && !f.isMetaRefresh) {
+    return {
+      level: 0,
+      action: 'allow',
+      reason: ['high-reputation domain'],
+      reputation: rep
+    };
+  }
+
+  // MỨC 3 — interstitial
+  if (
+    f.inBlocklist ||
+    f.overlay ||
+    f.isMetaRefresh ||
+    risk >= 70 ||
+    rep.level === 'low' ||
+    (rep.level === 'unknown' && rep.score < 30) || // Thêm check cho API trả về score thấp
+    (f.noUserGesture && risk >= 50)
+  ) {
+    return {
+      level: 3,
+      action: 'interstitial',
+      reason: buildReason(f, rep),
+      reputation: rep
+    };
+  }
+
+  // MỨC 2 — toast cảnh báo
+  if (
+    risk >= 35 ||
+    rep.level === 'unknown' ||
+    f.inIframe ||
+    f.isWindowOpen ||
+    f.redirectDepth > 1 ||
+    f.hrefMismatch
+  ) {
+    return {
+      level: 2,
+      action: 'warn-toast',
+      reason: buildReason(f, rep),
+      reputation: rep
+    };
+  }
+
+  // MỨC 1 — toast thông tin
+  return {
+    level: 1,
+    action: 'info-toast',
+    reason: ['cross-origin navigation'],
+    reputation: rep
+  };
+}

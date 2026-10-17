@@ -1,0 +1,27 @@
+import type { Reputation } from '../shared/types';
+
+const cache = new Map<string, Reputation>();
+
+export async function getReputation(url: string): Promise<Reputation> {
+  let host: string;
+  try {
+    host = new URL(url).hostname;
+  } catch {
+    return { level: 'unknown', score: 50, reasons: [], source: 'local' };
+  }
+
+  const cached = cache.get(host);
+  if (cached) return cached;
+
+  // Phase 1: heuristic local rất đơn giản.
+  // Phase 2: gọi API server.
+  const result: Reputation = {
+    level: 'unknown',
+    score: 50,
+    reasons: [],
+    source: 'local'
+  };
+
+  cache.set(host, result);
+  return result;
+}

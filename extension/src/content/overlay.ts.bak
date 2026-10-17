@@ -1,0 +1,29 @@
+export function detectOverlay(topEl: Element | null, clickedEl: Element): boolean {
+  if (!topEl) return false;
+  if (topEl === clickedEl) return false;
+  if (topEl.contains(clickedEl) || clickedEl.contains(topEl)) return false;
+
+  const style = getComputedStyle(topEl);
+  const opacity = parseFloat(style.opacity);
+  const isTransparent =
+    opacity < 0.1 ||
+    style.visibility === 'hidden' ||
+    style.backgroundColor === 'rgba(0, 0, 0, 0)';
+
+  const hasNoContent =
+    topEl.textContent?.trim() === '' &&
+    !topEl.querySelector('img, svg, video');
+
+  const rect = topEl.getBoundingClientRect();
+  const covers = rect.width > 100 && rect.height > 100;
+
+  return isTransparent && hasNoContent && covers;
+}
+
+export function getFrameAncestorOrigin(): string | undefined {
+  try {
+    return window.top?.location.origin;
+  } catch {
+    return undefined;
+  }
+}

@@ -1,0 +1,96 @@
+import { db, redis } from '../db/index.js';
+
+export type ReputationLevel = 'high' | 'medium' | 'low' | 'unknown';
+
+export type ReputationResult = {
+  url: string;
+  domain: string;
+  level: ReputationLevel;
+  score: number;
+  reasons: string[];
+  sources: string[];
+  cached: boolean;
+};
+
+// Heuristic tạm thời cho Phase 2
+function localHeuristic(domain: string): { level: ReputationLevel; score: number; reasons: string[] } {
+  let score = 50;
+  const reasons: string[] = [];
+
+  if (domain.includes('phishing') || domain.includes('malware')) {
+    return { level: 'low', score: 5, reasons: ['blacklisted_keyword'] };
+  }
+  
+  if (domain.endsWith('.xyz') || domain.endsWith('.top')) {
+    score -= 20;
+    reasons.push('suspicious_tld');
+  }
+
+  if (domain === 'google.com' || domain === 'facebook.com' || domain === 'example.com') {
+    score = 95;
+    reasons.push('trusted_domain');
+  }
+
+  let level: ReputationLevel = 'unknown';
+  if (score >= 80) level = 'high';
+  else if (score >= 50) level = 'medium';
+  else if (score < 30) level = 'low';
+
+  return { level, score, reasons };
+}
+
+export async function getReputation(urlStr: string): Promise<ReputationResult> {
+  let domain = '';
+  try {
+    domain = new URL(urlStr).hostname;
+  } catch {
+    return { url: urlStr, domain: 'invalid', level: 'unknown', score: 0, reasons: ['invalid_url'], sources: [], cached: false };
+  }
+
+  // 1. Check Redis Cache
+  const cacheKey = `rep:${domain}`;
+  const cachedData = await redis.get(cacheKey);
+  if (cachedData) {
+    return { ...JSON.parse(cachedData), url: urlStr, cached: true };
+  }
+
+  // 2. Check Postgres
+  const dbRes = await db.query('SELECT * FROM reputation_cache WHERE domain = $1 AND checked_at > NOW() - INTERVAL \'1 day\'', [domain]);
+  if (dbRes.rows.length > 0) {
+    const row = dbRes.rows[0];
+    const result: ReputationResult = {
+      url: urlStr,
+      domain,
+      level: row.level,
+      score: row.score,
+      reasons: row.reasons,
+      sources: row.sources,
+      cached: true
+    };
+    await redis.setex(cacheKey, 3600, JSON.stringify({ ...result, url: undefined, cached: undefined }));
+    return result;
+  }
+
+  // 3. Calculate (Local Heuristic - Phase 2)
+  const { level, score, reasons } = localHeuristic(domain);
+  const sources = ['local_heuristic'];
+
+  const result: ReputationResult = {
+    url: urlStr,
+    domain,
+    level,
+    score,
+    reasons,
+    sources,
+    cached: false
+  };
+
+  // 4. Save to DB & Redis
+  await db.query(
+    'INSERT INTO reputation_cache (domain, level, score, reasons, sources, ttl) VALUES ($1, $2, $3, $4, $5, $6) ON CONFLICT (domain) DO UPDATE SET level = EXCLUDED.level, score = EXCLUDED.score, reasons = EXCLUDED.reasons, checked_at = NOW()',
+    [domain, level, score, JSON.stringify(reasons), JSON.stringify(sources), 86400]
+  );
+  await redis.setex(cacheKey, 3600, JSON.stringify({ ...result, url: undefined, cached: undefined }));
+
+  return result;
+}

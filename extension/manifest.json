@@ -1,0 +1,39 @@
+{
+  "manifest_version": 3,
+  "name": "NavGuard",
+  "version": "1.0.1",
+  "description": "Chặn redirect quảng cáo và lừa đảo",
+  "permissions": [
+    "storage",
+    "tabs",
+    "webNavigation",
+    "webRequest",
+    "declarativeNetRequest",
+    "scripting",
+    "activeTab"
+  ],
+  "host_permissions": ["<all_urls>"],
+  "background": {
+    "service_worker": "background.js",
+    "type": "module"
+  },
+  "content_scripts": [
+    {
+      "matches": ["<all_urls>"],
+      "js": ["content.js"],
+      "run_at": "document_start",
+      "all_frames": true
+    }
+  ],
+  "web_accessible_resources": [
+    {
+      "resources": ["injected.js", "blocked.html", "blocked.css", "assets/*"],
+      "matches": ["<all_urls>"]
+    }
+  ],
+  "action": {
+    "default_popup": "popup.html",
+    "default_title": "NavGuard"
+  },
+  "options_page": "options.html"
+}

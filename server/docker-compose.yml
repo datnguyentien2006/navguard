@@ -1,0 +1,28 @@
+version: '3.8'
+
+services:
+  postgres:
+    image: postgres:16-alpine
+    container_name: navguard-postgres
+    environment:
+      POSTGRES_USER: navguard
+      POSTGRES_PASSWORD: navguard_dev_password
+      POSTGRES_DB: navguard
+    ports:
+      - "5432:5432"
+    volumes:
+      - navguard_pgdata:/var/lib/postgresql/data
+    restart: unless-stopped
+
+  redis:
+    image: redis:7-alpine
+    container_name: navguard-redis
+    ports:
+      - "6379:6379"
+    volumes:
+      - navguard_redisdata:/data
+    restart: unless-stopped
+
+volumes:
+  navguard_pgdata:
+  navguard_redisdata:

@@ -1,0 +1,29 @@
+<!DOCTYPE html>
+<html lang="vi">
+<head>
+  <meta charset="UTF-8" />
+  <title>NavGuard</title>
+  <link rel="stylesheet" href="./popup.css" />
+</head>
+<body>
+  <header>
+    <h1>🛡️ NavGuard</h1>
+    <span id="status">Đang tải...</span>
+  </header>
+  <nav>
+    <button data-tab="log" class="active">Log</button>
+    <button data-tab="allow">Cho phép</button>
+    <button data-tab="block">Chặn</button>
+  </nav>
+  <main>
+    <section id="tab-log" class="tab active"></section>
+    <section id="tab-allow" class="tab"></section>
+    <section id="tab-block" class="tab"></section>
+  </main>
+  <footer>
+    <button id="clear-logs" class="link-btn">Xóa log</button>
+    <button id="clear-all" class="link-btn danger">Reset tất cả</button>
+  </footer>
+  <script type="module" src="./popup.ts"></script>
+</body>
+</html>

@@ -1,0 +1,36 @@
+<!DOCTYPE html>
+<html lang="vi">
+<head>
+  <meta charset="UTF-8">
+  <title>Overlay Test</title>
+  <style>
+    body { font-family: sans-serif; padding: 40px; }
+    h1 { color: #333; }
+    .overlay {
+      position: fixed; top: 0; left: 0;
+      width: 100vw; height: 100vh;
+      background: rgba(0, 0, 0, 0);
+      opacity: 0.05;
+      z-index: 9999;
+      cursor: pointer;
+    }
+    .bait {
+      padding: 20px; background: #4caf50; color: white;
+      text-align: center; font-size: 20px; border-radius: 8px;
+      cursor: pointer; display: inline-block;
+    }
+  </style>
+</head>
+<body>
+  <h1>Test Overlay Detection</h1>
+  <p>Trang này có lớp phủ trong suốt ở trên cùng.</p>
+  <p>NavGuard sẽ phát hiện và cảnh báo (level 3).</p>
+  <div class="bait">Bấm vào đây (thực ra là overlay ở trên)</div>
+  <div class="overlay" id="overlay"></div>
+  <script>
+    document.getElementById('overlay').addEventListener('click', function () {
+      window.location.href = 'https://example.com/';
+    });
+  </script>
+</body>
+</html>

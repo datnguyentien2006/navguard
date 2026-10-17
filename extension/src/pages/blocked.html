@@ -1,0 +1,50 @@
+<!DOCTYPE html>
+<html lang="vi">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>NavGuard — Cảnh báo bảo mật</title>
+  <link rel="stylesheet" href="./blocked.css" />
+</head>
+<body>
+  <div class="container">
+    <div class="header">
+      <div class="shield-icon">🛡️</div>
+      <div>
+        <h1 id="title">Đã chặn chuyển hướng</h1>
+        <p class="subtitle" id="source-line">Đang kiểm tra nguồn...</p>
+      </div>
+    </div>
+    
+    <div class="destination-box">
+      <div class="destination-label">ĐÍCH ĐẾN BỊ CHẶN</div>
+      <div class="destination-url" id="destination">(đang tải...)</div>
+    </div>
+
+    <ul class="reasons-list" id="reasons"></ul>
+
+    <div class="actions">
+      <button class="btn-primary" id="back">
+        <span>←</span> Quay lại an toàn
+      </button>
+      
+      <div class="divider"></div>
+
+      <label class="confirm-box" for="confirm-check">
+        <input type="checkbox" id="confirm-check" />
+        <span class="checkmark"></span>
+        <span class="confirm-text">Tôi xác nhận đã đọc cảnh báo và tự chịu trách nhiệm.</span>
+      </label>
+      
+      <button class="btn-danger" id="proceed" disabled>
+        Tôi hiểu rủi ro, vẫn tiếp tục (3s)
+      </button>
+    </div>
+
+    <div class="footer">
+      <span>🛡️</span> NavGuard — Bảo vệ bạn khỏi các trang web độc hại
+    </div>
+  </div>
+  <script type="module" src="./blocked.ts"></script>
+</body>
+</html>
