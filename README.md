@@ -95,24 +95,31 @@ Chạy Unit Test cho Extension (Vitest):
 
 ---
 
+
 ## 📸 Thư viện Hình ảnh (Gallery)
 
 **1. Màn hình cảnh báo nguy hiểm (Interstitial Page - Glassmorphism)**
+
 ![Interstitial Page](./docs/images/1-interstitial.png)
 
 **2. Quản lý Log và Danh sách (Popup UI)**
+
 ![Popup UI](./docs/images/2-popup.png)
 
 **3. Trang Cài đặt (Options Page)**
+
 ![Options Page](./docs/images/3-options.png)
 
 **4. Cảnh báo nhẹ trên trang web (Toast UI)**
+
 ![Toast UI](./docs/images/4-toast.png)
 
 **5. Icon Extension**
+
 ![Icon](./docs/images/5-icon.png)
 
 ---
+
 
 ## 🛡️ Giấy phép (License)
 Dự án được thực hiện cho mục đích học tập và nghiên cứu bảo mật tại Trường Đại học Bách khoa - ĐHQG TP.HCM. Vui lòng ghi rõ nguồn tác giả nếu sử dụng lại mã nguồn.
